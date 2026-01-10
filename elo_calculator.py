@@ -22,8 +22,8 @@ GD_MULTIPLIERS = {
 
 HOME_ADVANTAGE = 60.0
 
-JSON_FILENAME = "elo_ratings_terza_categoria.json"
-BACKUP_DIR = "elo_backups"
+JSON_FILENAME = "elo_championship_data.json"
+BACKUP_DIR = "backups"
 
 # --- Backup Functions ---
 
@@ -39,7 +39,6 @@ def create_backup(filename):
     
     try:
         shutil.copy2(filename, backup_path)
-        print(f"Backup created: {backup_name}")
     except Exception as e:
         print(f"Warning: Could not create backup: {e}")
 
@@ -227,20 +226,39 @@ def update_ratings(ratings, match_counts, match_history, team_a, team_b, goals_a
     match_counts[team_a] = matches_a + 1
     match_counts[team_b] = matches_b + 1
 
+    # Calculate three-outcome probabilities
+    home_adv = 0
+    if is_home_a is True:
+        home_adv = HOME_ADVANTAGE
+    elif is_home_a is False:
+        home_adv = -HOME_ADVANTAGE
+    
+    adjusted_rating_a = rating_a + home_adv
+    rating_diff = adjusted_rating_a - rating_b
+    abs_diff = abs(rating_diff)
+    
+    # Calculate draw probability
+    if abs_diff <= 100:
+        draw_prob = 0.27 - (abs_diff / 100) * 0.02
+    elif abs_diff <= 200:
+        draw_prob = 0.25 - ((abs_diff - 100) / 100) * 0.05
+    elif abs_diff <= 300:
+        draw_prob = 0.20 - ((abs_diff - 200) / 100) * 0.05
+    else:
+        draw_prob = max(0.15 - ((abs_diff - 300) / 200) * 0.05, 0.08)
+    
+    # Adjust win probabilities
+    remaining_prob = 1.0 - draw_prob
+    win_a_prob = changes['expected_a'] * remaining_prob
+    win_b_prob = changes['expected_b'] * remaining_prob
+
     # Display results
     result_str = f"{team_a} {goals_a} - {goals_b} {team_b}"
-    home_indicator = ""
-    if is_home_a is True:
-        home_indicator = f" (Home: {team_a})"
-    elif is_home_a is False:
-        home_indicator = f" (Home: {team_b})"
+    home_indicator = " (H)" if is_home_a is True else " (A)" if is_home_a is False else ""
     
-    print(f"\nMatch #{match_record['match_id']} Recorded: {result_str}{home_indicator}")
-    print(f"  Match #{matches_a + 1} for {team_a}, #{matches_b + 1} for {team_b}")
-    print(f"  K-Factor: {changes['k_adjusted']:.1f} (Base: {changes['k_base']:.1f}, GD Mult: {changes['gd_multiplier']:.2f})")
-    print(f"  Win Probability before match: {team_a} {changes['expected_a']*100:.1f}% - {team_b} {changes['expected_b']*100:.1f}%")
-    print(f"  New Rating {team_a}: {new_rating_a:.1f} ({changes['change_a']:+.1f})")
-    print(f"  New Rating {team_b}: {new_rating_b:.1f} ({changes['change_b']:+.1f})")
+    print(f"\nMatch #{match_record['match_id']}: {result_str}{home_indicator}")
+    print(f"Ratings: {team_a} {new_rating_a:.1f} ({changes['change_a']:+.1f}) | {team_b} {new_rating_b:.1f} ({changes['change_b']:+.1f})")
+    print(f"Pre-match probabilities: {team_a} {win_a_prob*100:.1f}% | Draw {draw_prob*100:.1f}% | {team_b} {win_b_prob*100:.1f}%")
 
 def recalculate_all_ratings(match_history):
     """
@@ -290,19 +308,18 @@ def display_rankings(ratings, match_counts):
     sorted_teams = sorted(ratings.items(), key=lambda item: item[1], reverse=True)
 
     print("\n" + "="*70)
-    print("TERZA CATEGORIA - LUCCA - ELO RANKINGS")
+    print("ELO RANKINGS")
     print("="*70)
     print(f"{'Rank':<6} {'Team':<25} {'Rating':<10} {'Matches':<8} {'Status'}")
     print("-" * 70)
     
     for i, (team, rating) in enumerate(sorted_teams, 1):
         matches = match_counts.get(team, 0)
-        status = "PROVISIONAL" if matches < EARLY_MATCHES_THRESHOLD else "Established"
+        status = "Provisional" if matches < EARLY_MATCHES_THRESHOLD else "Established"
         print(f"{i:<6} {team:<25} {rating:<10.1f} {matches:<8} {status}")
     
     print("-" * 70)
-    print(f"Total Teams: {len(sorted_teams)}")
-    print(f"Note: Ratings become reliable after {EARLY_MATCHES_THRESHOLD} matches per team\n")
+    print(f"Total Teams: {len(sorted_teams)}\n")
 
 def display_match_history(match_history, limit=10):
     """Displays recent match history."""
@@ -468,43 +485,42 @@ def add_match_result(ratings, match_counts, match_history):
     print("\n--- Add Match Result ---")
     
     while True:
-        team_a = input("Enter name of HOME team: ").strip()
+        team_a = input("Home team: ").strip()
         if team_a: break
         print("Team name cannot be empty.")
     
     while True:
-        team_b = input(f"Enter name of AWAY team (opponent of {team_a}): ").strip()
+        team_b = input(f"Away team: ").strip()
         if team_b and team_b != team_a: break
-        elif team_b == team_a: print("Home and Away teams must be different.")
+        elif team_b == team_a: print("Teams must be different.")
         else: print("Team name cannot be empty.")
 
     while True:
         try:
-            goals_a = int(input(f"Enter goals scored by {team_a} (HOME): ").strip())
+            goals_a = int(input(f"Goals {team_a}: ").strip())
             if goals_a >= 0: break
             print("Goals cannot be negative.")
         except ValueError: 
-            print("Invalid input. Please enter a whole number.")
+            print("Invalid input.")
     
     while True:
         try:
-            goals_b = int(input(f"Enter goals scored by {team_b} (AWAY): ").strip())
+            goals_b = int(input(f"Goals {team_b}: ").strip())
             if goals_b >= 0: break
             print("Goals cannot be negative.")
         except ValueError: 
-            print("Invalid input. Please enter a whole number.")
+            print("Invalid input.")
 
     # Ask if this is actually a neutral venue match
     while True:
-        neutral_input = input(f"Was this match played on neutral ground? (yes/no, default=no): ").strip().lower()
-        if neutral_input == 'yes' or neutral_input == 'y':
+        neutral_input = input(f"Neutral venue? (y/n, default=n): ").strip().lower()
+        if neutral_input == 'y' or neutral_input == 'yes':
             is_home_a = None
-            print("Match recorded as neutral venue.")
             break
-        elif neutral_input == 'no' or neutral_input == 'n' or neutral_input == '':
+        elif neutral_input == 'n' or neutral_input == 'no' or neutral_input == '':
             is_home_a = True
             break
-        print("Invalid input. Enter 'yes' or 'no'.")
+        print("Invalid input.")
 
     update_ratings(ratings, match_counts, match_history, team_a, team_b, goals_a, goals_b, is_home_a)
 
@@ -513,28 +529,28 @@ def predict_match(ratings, match_counts):
     print("\n--- Match Prediction ---")
     
     while True:
-        team_a = input("Enter name of HOME team: ").strip()
+        team_a = input("Home team: ").strip()
         if team_a in ratings: break
-        elif team_a: print(f"Team '{team_a}' not found in ratings.")
+        elif team_a: print(f"Team '{team_a}' not found.")
         else: print("Team name cannot be empty.")
     
     while True:
-        team_b = input("Enter name of AWAY team: ").strip()
+        team_b = input("Away team: ").strip()
         if team_b in ratings and team_b != team_a: break
-        elif team_b == team_a: print("Home and Away teams must be different.")
-        elif team_b: print(f"Team '{team_b}' not found in ratings.")
+        elif team_b == team_a: print("Teams must be different.")
+        elif team_b: print(f"Team '{team_b}' not found.")
         else: print("Team name cannot be empty.")
     
     # Ask if neutral venue
     while True:
-        neutral_input = input(f"Is this match on neutral ground? (yes/no, default=no): ").strip().lower()
-        if neutral_input == 'yes' or neutral_input == 'y':
+        neutral_input = input(f"Neutral venue? (y/n, default=n): ").strip().lower()
+        if neutral_input == 'y' or neutral_input == 'yes':
             is_home_a = None
             break
-        elif neutral_input == 'no' or neutral_input == 'n' or neutral_input == '':
+        elif neutral_input == 'n' or neutral_input == 'no' or neutral_input == '':
             is_home_a = True
             break
-        print("Invalid input. Enter 'yes' or 'no'.")
+        print("Invalid input.")
     
     rating_a = ratings[team_a]
     rating_b = ratings[team_b]
@@ -542,22 +558,21 @@ def predict_match(ratings, match_counts):
     matches_b = match_counts.get(team_b, 0)
     
     home_adv = 0
-    venue_type = "Neutral Venue"
+    venue_type = "Neutral"
     if is_home_a is True:
         home_adv = HOME_ADVANTAGE
-        venue_type = f"Home: {team_a}"
+        venue_type = f"{team_a} (Home)"
     
     # Calculate adjusted ratings
     adjusted_rating_a = rating_a + home_adv
     rating_diff = adjusted_rating_a - rating_b
+    abs_diff = abs(rating_diff)
     
     # Calculate win probabilities using Elo formula
     expected_a = calculate_expected_score(rating_a, rating_b, home_adv)
     expected_b = 1 - expected_a
     
-    # Calculate draw probability based on rating difference
-    abs_diff = abs(rating_diff)
-    
+    # Calculate draw probability
     if abs_diff <= 100:
         draw_prob = 0.27 - (abs_diff / 100) * 0.02
     elif abs_diff <= 200:
@@ -567,29 +582,24 @@ def predict_match(ratings, match_counts):
     else:
         draw_prob = max(0.15 - ((abs_diff - 300) / 200) * 0.05, 0.08)
     
-    # Adjust win probabilities to account for draws
+    # Adjust win probabilities
     remaining_prob = 1.0 - draw_prob
     win_a = expected_a * remaining_prob
     win_b = expected_b * remaining_prob
     
-    print(f"\n--- Match Prediction ---")
-    print(f"{team_a} (HOME - Rating: {rating_a:.1f}, Matches: {matches_a})")
-    print(f"    vs")
-    print(f"{team_b} (AWAY - Rating: {rating_b:.1f}, Matches: {matches_b})")
+    print(f"\n{team_a} (Elo: {rating_a:.1f}, {matches_a} matches)")
+    print(f"vs")
+    print(f"{team_b} (Elo: {rating_b:.1f}, {matches_b} matches)")
     print(f"\nVenue: {venue_type}")
-    print(f"Rating Difference: {abs(rating_a - rating_b):.1f} points")
-    if home_adv != 0:
-        print(f"Home Advantage: +{abs(home_adv):.1f} points to {team_a}")
-        print(f"Adjusted Rating Difference: {abs(rating_diff):.1f} points")
+    print(f"Rating difference: {abs(rating_diff):.1f} points")
     
-    print(f"\nMatch Outcome Probabilities:")
+    print(f"\nPredicted probabilities:")
     print(f"  {team_a} Win: {win_a*100:.1f}%")
     print(f"  Draw:       {draw_prob*100:.1f}%")
     print(f"  {team_b} Win: {win_b*100:.1f}%")
-    print(f"  Total:      {(win_a + draw_prob + win_b)*100:.1f}%")
     
     if matches_a < EARLY_MATCHES_THRESHOLD or matches_b < EARLY_MATCHES_THRESHOLD:
-        print("\nNote: One or both teams have provisional ratings (fewer than 5 matches)")
+        print("\nNote: One or both teams have provisional ratings")
 
 def backup_and_restore_menu(filename):
     """Menu for backup and restore operations."""
@@ -813,7 +823,7 @@ def calculate_league_standings(match_history):
 def display_league_table(match_history, ratings):
     """Displays the current league standings table."""
     if not match_history:
-        print("\nNo matches played yet. No standings to display.")
+        print("\nNo matches played yet.")
         return
     
     standings = calculate_league_standings(match_history)
@@ -830,7 +840,7 @@ def display_league_table(match_history, ratings):
     )
     
     print("\n" + "="*95)
-    print("CURRENT LEAGUE STANDINGS - TERZA CATEGORIA LUCCA")
+    print("LEAGUE STANDINGS")
     print("="*95)
     print(f"{'Pos':<4} {'Team':<22} {'MP':<4} {'W':<3} {'D':<3} {'L':<3} {'GF':<4} {'GA':<4} {'GD':<5} {'Pts':<4} {'Elo':<7}")
     print("-" * 95)
@@ -843,8 +853,7 @@ def display_league_table(match_history, ratings):
               f"{stats['goals_against']:<4} {gd:+5} {stats['points']:<4} {elo:<7.1f}")
     
     print("-" * 95)
-    print("MP=Matches Played, W=Wins, D=Draws, L=Losses, GF=Goals For, GA=Goals Against")
-    print("GD=Goal Difference, Pts=Points, Elo=Current Elo Rating\n")
+    print("MP=Matches Played, W=Wins, D=Draws, L=Losses, GF=Goals For, GA=Goals Against, GD=Goal Difference\n")
 
 def generate_remaining_fixtures(match_history, all_teams):
     """
@@ -919,7 +928,7 @@ def simulate_match(rating_a, rating_b, is_home_a):
             goals_b = goals_a + 1
         return goals_a, goals_b, 0, 3
 
-def simulate_season(standings, ratings, remaining_fixtures, num_simulations=10000):
+def simulate_season(standings, ratings, remaining_fixtures, num_simulations=100000):
     """
     Runs Monte Carlo simulation of remaining season.
     Returns statistics about final positions for each team.
@@ -978,7 +987,7 @@ def simulate_season(standings, ratings, remaining_fixtures, num_simulations=1000
 def display_season_prediction(match_history, ratings):
     """Displays predicted final standings based on Monte Carlo simulation."""
     if not match_history:
-        print("\nNo matches played yet. Cannot predict season outcome.")
+        print("\nNo matches played yet.")
         return
     
     standings = calculate_league_standings(match_history)
@@ -992,22 +1001,21 @@ def display_season_prediction(match_history, ratings):
     total_matches_per_team = (len(all_teams) - 1) * 2
     matches_played = standings[all_teams[0]]['matches_played']
     
-    print(f"\nTeams in championship: {len(all_teams)}")
-    print(f"Matches per team in full season: {total_matches_per_team}")
-    print(f"Matches played so far: {matches_played}")
-    print(f"Matches remaining: {total_matches_per_team - matches_played}")
+    print(f"\nChampionship: {len(all_teams)} teams")
+    print(f"Season format: {total_matches_per_team} matches per team (home and away)")
+    print(f"Progress: {matches_played}/{total_matches_per_team} matches played")
     
     if matches_played >= total_matches_per_team:
-        print("\nSeason complete! Showing final standings.")
+        print("\nSeason complete! Final standings:")
         display_league_table(match_history, ratings)
         return
     
     # Generate remaining fixtures
     remaining_fixtures = generate_remaining_fixtures(match_history, all_teams)
-    print(f"Total remaining fixtures: {len(remaining_fixtures)}")
+    print(f"Remaining fixtures: {len(remaining_fixtures)}")
     
     # Run simulation
-    num_sims = 10000
+    num_sims = 100000
     position_counts, points_dist = simulate_season(standings, ratings, remaining_fixtures, num_sims)
     
     # Calculate statistics
@@ -1054,12 +1062,13 @@ def display_season_prediction(match_history, ratings):
         prediction_stats[team]['current_position'] = pos
     
     # Display predictions
-    print("\n" + "="*110)
-    print("PREDICTED FINAL STANDINGS (Based on 10,000 Monte Carlo Simulations)")
-    print("="*110)
-    print(f"{'Team':<22} {'Curr':<5} {'Pts':<4} {'Exp Pos':<8} {'Champion':<10} {'Top 5':<8} {'Exp Pts':<9} {'Pts Range':<12}")
-    print(f"{'':22} {'Pos':<5} {'Now':<4} {'(Avg)':<8} {'%':<10} {'%':<8} {'(Final)':<9} {'(Min-Max)':<12}")
-    print("-" * 110)
+    print("\n" + "="*100)
+    print("PREDICTED FINAL STANDINGS")
+    print(f"Based on {num_sims:,} Monte Carlo simulations")
+    print("="*100)
+    print(f"{'Team':<22} {'Curr':<5} {'Pts':<4} {'Pred':<6} {'Title':<8} {'Top 5':<8} {'Final':<8} {'Range':<12}")
+    print(f"{'':22} {'Pos':<5} {'Now':<4} {'Pos':<6} {'%':<8} {'%':<8} {'Pts':<8} {'(Min-Max)':<12}")
+    print("-" * 100)
     
     # Sort by expected position
     sorted_predictions = sorted(
@@ -1069,50 +1078,38 @@ def display_season_prediction(match_history, ratings):
     
     for team, stats in sorted_predictions:
         print(f"{team:<22} {stats['current_position']:<5} {stats['current_points']:<4} "
-              f"{stats['expected_position']:<8.1f} {stats['champion_probability']:<10.1f} "
-              f"{stats['top5_probability']:<8.1f} {stats['expected_points']:<9.1f} "
+              f"{stats['expected_position']:<6.1f} {stats['champion_probability']:<8.1f} "
+              f"{stats['top5_probability']:<8.1f} {stats['expected_points']:<8.1f} "
               f"{stats['points_range'][0]}-{stats['points_range'][1]}")
     
-    print("-" * 110)
-    print("\nInterpretation:")
-    print("- 'Exp Pos' shows the average predicted final position")
-    print("- 'Champion %' is probability of winning the championship")
-    print("- 'Top 5 %' is probability of finishing in top 5 positions")
-    print("- 'Exp Pts' shows expected points at end of season")
-    print("- Predictions based on current Elo ratings and remaining fixtures\n")
+    print("-" * 100)
+    print("\nNote: Predictions based on current Elo ratings and home advantage\n")
 
 # --- Main Program ---
 def main():
     team_ratings, match_history, match_counts = load_data(JSON_FILENAME)
 
     print("\n" + "="*70)
-    print("TERZA CATEGORIA LUCCA - ELO RATING SYSTEM")
-    print("="*70)
-    print("Features:")
-    print("- Complete match history with undo/edit/delete")
-    print("- Automatic backups on every save")
-    print("- Manual backup and restore system")
-    print("- Home advantage adjustment")
-    print("- Early season rapid convergence")
+    print("ELO CHAMPIONSHIP RATING SYSTEM")
     print("="*70)
 
     while True:
-        print("\n--- MAIN MENU ---")
+        print("\n--- MENU ---")
         print("  1: Add Match Result")
-        print("  2: Display Current Rankings (Elo)")
-        print("  3: Display League Table (Points)")
-        print("  4: Predict Final Standings")
-        print("  5: View Match History")
+        print("  2: Elo Rankings")
+        print("  3: League Table")
+        print("  4: Season Prediction")
+        print("  5: Match History")
         print("  6: Undo Last Match")
         print("  7: Edit Match")
         print("  8: Delete Match")
-        print("  9: Predict Single Match")
+        print("  9: Predict Match")
         print("  10: Backup & Restore")
         print("  11: Rename Team")
-        print("  12: Reset Championship")
-        print("  13: Save and Quit")
+        print("  12: Reset All Data")
+        print("  13: Save and Exit")
 
-        choice = input("\nEnter your choice: ").strip()
+        choice = input("\nChoice: ").strip()
 
         if choice == '1':
             add_match_result(team_ratings, match_counts, match_history)
@@ -1148,12 +1145,11 @@ def main():
         elif choice == '13':
             create_backup(JSON_FILENAME)
             save_data(team_ratings, match_history, match_counts, JSON_FILENAME)
-            print(f"\nData saved to '{JSON_FILENAME}'.")
-            print("Final backup created.")
-            print("Arrivederci!")
+            print(f"\nData saved successfully.")
+            print("Goodbye!")
             break
         else:
-            print("Invalid choice. Please try again.")
+            print("Invalid choice.")
 
 if __name__ == "__main__":
     main()
