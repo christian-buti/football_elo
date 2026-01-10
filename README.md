@@ -68,7 +68,7 @@ The system also uses Monte Carlo simulation to predict final championship standi
 1. Clone the repository:
 ```bash
 git clone https://github.com/christian-buti/elo_calculator.git
-cd football-elo-rating
+cd elo_calculator
 ```
 
 2. Run the script:
