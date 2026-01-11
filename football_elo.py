@@ -23,7 +23,7 @@ GD_MULTIPLIERS = {
 HOME_ADVANTAGE = 60.0
 
 JSON_FILENAME = "elo_championship_data.json"
-BACKUP_DIR = "backups"
+BACKUP_DIR = "elo_backups"
 
 # --- Backup Functions ---
 
@@ -39,8 +39,30 @@ def create_backup(filename):
     
     try:
         shutil.copy2(filename, backup_path)
+        cleanup_old_backups(max_backups=30)
     except Exception as e:
         print(f"Warning: Could not create backup: {e}")
+
+def cleanup_old_backups(max_backups=30):
+    """Keeps only the most recent backups, deletes older ones."""
+    if not os.path.exists(BACKUP_DIR):
+        return
+    
+    backups = [f for f in os.listdir(BACKUP_DIR) if f.startswith('backup_') and f.endswith('.json')]
+    
+    if len(backups) <= max_backups:
+        return
+    
+    # Sort by filename (timestamp is in filename)
+    backups.sort(reverse=True)
+    
+    # Delete old backups
+    backups_to_delete = backups[max_backups:]
+    for backup in backups_to_delete:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, backup))
+        except Exception as e:
+            print(f"Warning: Could not delete old backup {backup}: {e}")
 
 def list_backups():
     """Lists available backups."""
@@ -928,7 +950,7 @@ def simulate_match(rating_a, rating_b, is_home_a):
             goals_b = goals_a + 1
         return goals_a, goals_b, 0, 3
 
-def simulate_season(standings, ratings, remaining_fixtures, num_simulations=100000):
+def simulate_season(standings, ratings, remaining_fixtures, num_simulations=10000):
     """
     Runs Monte Carlo simulation of remaining season.
     Returns statistics about final positions for each team.
@@ -1015,7 +1037,7 @@ def display_season_prediction(match_history, ratings):
     print(f"Remaining fixtures: {len(remaining_fixtures)}")
     
     # Run simulation
-    num_sims = 100000
+    num_sims = 10000
     position_counts, points_dist = simulate_season(standings, ratings, remaining_fixtures, num_sims)
     
     # Calculate statistics
